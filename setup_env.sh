@@ -11,7 +11,7 @@ set -Eeuo pipefail
 #   - tmux
 #   - private hanwlax/.tmux config
 #   - catppuccin-tmux
-#   - codex
+#   - codex (via npm)
 #   - colbymchenry/codegraph
 #   - proxy env
 #   - node v24.15 PATH
@@ -27,6 +27,9 @@ PROXY_URL="${PROXY_URL:-http://127.0.0.1:7899}"
 
 # 通常 Node 解压目录要加 bin。
 NODE_HOME="${NODE_HOME:-/home/hanwlax/node-v24.15}"
+
+# npm 全局安装和缓存目录。
+NPM_PREFIX="${NPM_PREFIX:-/home/hanwlax/node}"
 
 INSTALL_CODEX="${INSTALL_CODEX:-1}"
 INSTALL_CODEGRAPH="${INSTALL_CODEGRAPH:-1}"
@@ -136,10 +139,19 @@ setup_runtime_path() {
     export PATH="$NODE_HOME:$PATH"
   fi
 
+  export PATH="$NPM_PREFIX/bin:$PATH"
+
   export http_proxy="$PROXY_URL"
   export https_proxy="$PROXY_URL"
   export HTTP_PROXY="$PROXY_URL"
   export HTTPS_PROXY="$PROXY_URL"
+}
+
+setup_npm_dirs() {
+  log "Configuring npm prefix and cache under $NPM_PREFIX..."
+  mkdir -p "$NPM_PREFIX"
+  npm config set prefix "$NPM_PREFIX"
+  npm config set cache "$NPM_PREFIX/cache"
 }
 
 apt_install_base() {
@@ -290,12 +302,11 @@ export https_proxy="$PROXY_URL"
 export HTTP_PROXY="$PROXY_URL"
 export HTTPS_PROXY="$PROXY_URL"
 export no_proxy=127.0.0.1,localhost,local,.local,.modelscope.cn
-export NO_PROXY="$no_proxy"
+export NO_PROXY="\$no_proxy"
 export TERM="xterm-256color"
 
-export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
 $node_path_line
-export PATH="\$HOME/.local/bin:\$HOME/bin:\$PATH"
+export PATH="$NPM_PREFIX/bin:\$HOME/.local/bin:\$HOME/bin:\$PATH"
 EOF
 )"
 
@@ -382,10 +393,8 @@ install_codex() {
     return 0
   fi
 
-  log "Installing Codex CLI..."
-  curl -fsSL https://chatgpt.com/codex/install.sh | sh
-
-  export PATH="/root/.local/bin:/root/bin:$PATH"
+  log "Installing Codex CLI via npm..."
+  npm install -g @openai/codex
 
   if has_cmd codex; then
     log "Codex installed: $(command -v codex)"
@@ -447,6 +456,7 @@ print_summary() {
   echo "zshrc:       /root/.zshrc"
   echo "proxy:       $PROXY_URL"
   echo "NODE_HOME:   $NODE_HOME"
+  echo "NPM_PREFIX:  $NPM_PREFIX"
   echo "GitHub SSH:  ssh.github.com:443 via Host github.com"
   echo "==================================================="
   echo
@@ -462,6 +472,7 @@ main() {
 
   apt_install_base
   setup_runtime_path
+  setup_npm_dirs
 
   setup_ssh_key
   test_github_ssh
