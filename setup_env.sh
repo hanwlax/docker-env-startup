@@ -289,7 +289,11 @@ export http_proxy="$PROXY_URL"
 export https_proxy="$PROXY_URL"
 export HTTP_PROXY="$PROXY_URL"
 export HTTPS_PROXY="$PROXY_URL"
+export no_proxy=127.0.0.1,localhost,local,.local,.modelscope.cn
+export NO_PROXY="$no_proxy"
+export TERM="xterm-256color"
 
+export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
 $node_path_line
 export PATH="\$HOME/.local/bin:\$HOME/bin:\$PATH"
 EOF
