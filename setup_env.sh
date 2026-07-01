@@ -25,8 +25,12 @@ TMUX_REPO="${TMUX_REPO:-git@github.com:hanwlax/.tmux.git}"
 
 PROXY_URL="${PROXY_URL:-http://127.0.0.1:7899}"
 
-# 通常 Node 解压目录要加 bin。
-NODE_HOME="${NODE_HOME:-/home/hanwlax/node-v24.15}"
+# Node.js 下载和解压配置。
+NODE_VERSION="${NODE_VERSION:-v24.18.0}"
+NODE_ARCH="${NODE_ARCH:-linux-arm64}"
+NODE_TARBALL="node-${NODE_VERSION}-${NODE_ARCH}.tar.xz"
+NODE_URL="https://nodejs.org/dist/${NODE_VERSION}/${NODE_TARBALL}"
+NODE_HOME="${NODE_HOME:-/home/hanwlax/node-${NODE_VERSION}-${NODE_ARCH}}"
 
 # npm 全局安装和缓存目录。
 NPM_PREFIX="${NPM_PREFIX:-/home/hanwlax/node}"
@@ -129,6 +133,83 @@ replace_block() {
 as_root_check() {
   if [ "$(id -u)" -ne 0 ]; then
     die "This script is designed for root Docker containers. Current uid=$(id -u)."
+  fi
+}
+
+download_nodejs() {
+  if [ -d "$NODE_HOME" ]; then
+    log "Node.js already exists at $NODE_HOME, skipping download."
+    return 0
+  fi
+
+  log "Downloading Node.js ${NODE_VERSION} for ${NODE_ARCH}..."
+  curl -fSL -o "/tmp/${NODE_TARBALL}" "$NODE_URL"
+
+  log "Extracting Node.js to /home/hanwlax/..."
+  tar -xJf "/tmp/${NODE_TARBALL}" -C /home/hanwlax/
+
+  rm -f "/tmp/${NODE_TARBALL}"
+  log "Node.js extracted to $NODE_HOME"
+}
+
+update_etc_environment() {
+  log "Updating /etc/environment..."
+  cat > /etc/environment <<'EOF'
+PATH="/home/hanwlax/node-v24.18.0-linux-arm64/bin:/usr/local/python3.11.15/bin:/usr/local/Ascend/cann-9.0.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"
+http_proxy="http://127.0.0.1:7899"
+https_proxy="http://127.0.0.1:7899"
+HTTP_PROXY="http://127.0.0.1:7899"
+HTTPS_PROXY="http://127.0.0.1:7899"
+no_proxy=127.0.0.1,localhost,local,.local,.modelscope.cn
+NO_PROXY="$no_proxy"
+TERM="xterm-256color"
+LANG="en_US.UTF-8"
+LANGUAGE="en_US:en"
+LC_ALL="en_US.UTF-8"
+EOF
+  log "/etc/environment updated."
+}
+
+update_apt_sources() {
+  log "Updating apt sources to Huawei mirror..."
+  sed -i "s@http://.*ubuntu.com@http://repo.huaweicloud.com@g" /etc/apt/sources.list
+  log "apt sources updated."
+}
+
+install_ssh_server() {
+  log "Installing openssh-server and autossh..."
+  DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends \
+    openssh-server \
+    autossh
+
+  read -r -p "请输入 SSH 端口号: " ssh_port
+  if [ -z "$ssh_port" ]; then
+    die "SSH 端口号不能为空。"
+  fi
+
+  log "Configuring sshd on port $ssh_port..."
+  sed -i "s/^#\?Port .*/Port $ssh_port/" /etc/ssh/sshd_config
+  sed -i "s/^#\?PermitRootLogin .*/PermitRootLogin prohibit-password/" /etc/ssh/sshd_config
+
+  mkdir -p /run/sshd
+  log "sshd configured: Port=$ssh_port, PermitRootLogin=prohibit-password"
+}
+
+setup_authorized_keys() {
+  local ssh_dir="/root/.ssh"
+  local auth_keys="$ssh_dir/authorized_keys"
+  local pubkey="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJTF6QWJR0PR8klqf9X4eT8W+MU8hie+R4ru+1/0Dyfk hanbo39@huawei.com"
+
+  mkdir -p "$ssh_dir"
+  chmod 700 "$ssh_dir"
+  touch "$auth_keys"
+  chmod 600 "$auth_keys"
+
+  if ! grep -Fq "$pubkey" "$auth_keys"; then
+    echo "$pubkey" >> "$auth_keys"
+    log "Public key added to $auth_keys"
+  else
+    warn "Public key already exists in $auth_keys"
   fi
 }
 
@@ -468,11 +549,18 @@ print_summary() {
 
 main() {
   as_root_check
+
+  update_etc_environment
+  update_apt_sources
+  download_nodejs
   setup_runtime_path
 
   apt_install_base
   setup_runtime_path
   setup_npm_dirs
+
+  install_ssh_server
+  setup_authorized_keys
 
   setup_ssh_key
   test_github_ssh
